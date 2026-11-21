@@ -1,0 +1,10 @@
+.env
+state/
+logs/
+data/historical/
+backtest/results/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.venv/
+tests/
