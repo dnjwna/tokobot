@@ -1,36 +1,38 @@
-# TokoBot — Bot Spot Trading Tokocrypto (Python, asyncio)
+# TokoBot — Spot Trading Bot for Tokocrypto (Python, asyncio)
 
-Bot spot long-only untuk pair USDT di Tokocrypto: **volatility breakout + market regime filter**,
-position sizing berbasis risiko tetap, kill-switch berlapis, rekonsiliasi state, dan tiga mode
-(`BACKTEST` / `PAPER` / `LIVE`) yang memakai kode strategi dan risk manager yang **sama**.
+> Versi Bahasa Indonesia: [README.id.md](README.id.md)
 
-> **Status: tidak direkomendasikan untuk uang riil.** Strategi bawaan **gagal** uji edge yang
-> ditetapkan sebelumnya (batas bawah CI 95% −0,021R; lihat [Hasil evaluasi](#1-hasil-evaluasi)).
-> Repo ini berguna sebagai kerangka eksekusi dan pipeline evaluasi yang jujur, bukan sebagai mesin profit.
+A long-only spot trading bot for USDT pairs on Tokocrypto (Indonesia): **volatility breakout + market regime
+filter**, fixed-risk position sizing, layered kill-switches, state reconciliation, and three modes
+(`BACKTEST` / `PAPER` / `LIVE`) that run the **same** strategy and risk code.
+
+> **Status: not recommended for real money.** The built-in strategy **failed** an edge test whose criteria were
+> written in advance (lower bound of the 95% CI: −0.021R; see [Evaluation results](#1-evaluation-results)).
+> This repo is useful as an execution framework and an honest evaluation pipeline, not as a money machine.
 
 ---
 
-## 1. Hasil evaluasi
+## 1. Evaluation results
 
-Konfigurasi yang diuji (dibekukan sebelum uji): **timeframe 4h, stop 3×ATR, `MAX_COST_TO_RISK=0.25`**.
-Biaya: fee akun 0,15% per sisi (terverifikasi via API), PPh final 0,21% di kedua sisi
-([PMK 50/2025](https://www.pajak.go.id/artikel/pmk-502025-babak-baru-pemajakan-aset-kripto)), slippage 0,05%.
+Tested configuration (frozen before testing): **4h timeframe, 3×ATR stop, `MAX_COST_TO_RISK=0.25`**.
+Costs: 0.15% fee per side (verified via the account API), 0.21% final income tax on both sides
+([Finance Ministry Regulation 50/2025](https://www.pajak.go.id/artikel/pmk-502025-babak-baru-pemajakan-aset-kripto)), 0.05% slippage.
 
-| Data uji (tidak dipakai saat memilih parameter) | Trade | Rata-rata R | PF |
+| Test data (not used when choosing parameters) | Trades | Mean R | Profit factor |
 |---|---|---|---|
-| BTC/ETH 2018–2021 | 87 | +0,214 | 1,63 |
-| SOL, BNB, XRP, ADA 2018–2026 | 279 | +0,073 | 1,18 |
-| **Gabungan** (CI 95%, bootstrap per bulan entry, 81 cluster) | **366** | **+0,106** (−0,021 s/d +0,228) | – |
+| BTC/ETH 2018–2021 | 87 | +0.214 | 1.63 |
+| SOL, BNB, XRP, ADA 2018–2026 | 279 | +0.073 | 1.18 |
+| **Combined** (95% CI, bootstrapped by entry month, 81 clusters) | **366** | **+0.106** (−0.021 to +0.228) | – |
 
-Kriteria lulus yang ditulis sebelum hasil: rata-rata > 0,1R **dan** batas bawah CI 95% > 0 → **GAGAL**.
+Pass criteria written before the results: mean > 0.1R **and** lower bound of the 95% CI > 0 → **FAIL**.
 
-Temuan utama:
-- Edge kotor ada (±0,18–0,34R per trade), tetapi biaya memakan 0,10–0,12R per trade.
-- Timeframe 1h tidak layak: edge kotor 0,05–0,12R vs biaya 0,17–0,28R.
-- 2025 dan 2026 negatif di gabungan keenam aset (−0,05R dan −0,08R).
-- Belum terverifikasi: apakah order BUY di pair USDT kena pajak. Bila tidak, satu run ulang diizinkan dan hasilnya final.
+Key findings:
+- A gross edge exists (about 0.18–0.34R per trade), but costs take 0.10–0.12R per trade.
+- The 1h timeframe is not viable: gross edge 0.05–0.12R vs. costs of 0.17–0.28R.
+- 2025 and 2026 were negative across all six coins combined (−0.05R and −0.08R).
+- Not yet verified: whether BUY orders on USDT pairs are taxed. If they are not, one re-run is allowed and its result is final.
 
-Mereproduksi uji keputusan:
+Reproduce the decision test:
 ```bash
 BACKTEST_END=2022-01-01 BACKTEST_RESULTS_DIR=results/btc_eth_2018_2021 \
   python main.py --mode BACKTEST && \
@@ -41,42 +43,43 @@ python scripts/bootstrap_ci.py \
   results/alts/trades_SOL_USDT-BNB_USDT-XRP_USDT-ADA_USDT_4h_research.csv --cluster month
 ```
 
-## 2. Fitur
+## 2. Features
 
-- **Konektor Tokocrypto:** REST signed HMAC SHA256 + sinkronisasi waktu, rate limiter (token bucket + header
-  `X-MBX-USED-WEIGHT-*` + `Retry-After` untuk 429/418), WebSocket kline dengan reconnect exponential backoff,
-  watchdog data basi, rotasi koneksi sebelum batas 24 jam.
-- **Presisi:** setiap order divalidasi (`Decimal`) terhadap `tickSize`, `stepSize`, `minNotional`, `PERCENT_PRICE`
-  sebelum dikirim.
-- **Idempotensi:** `clientId` deterministik per bar; timeout/5XX saat kirim order → dicari via `clientId`,
-  tidak pernah dikirim ulang buta → tidak ada pembelian ganda.
-- **Proteksi di bursa:** `STOP_LOSS_LIMIT` GTC aktif walau bot mati, plus watchdog exit market bila harga gap.
-- **Rekonsiliasi** tiap 30 detik: entry yang statusnya belum pasti, status stop order, saldo vs posisi, order yatim.
-- **Risk:** sizing 1R (biaya kedua sisi dihitung), maks posisi bersamaan, daily drawdown kill-switch,
-  hard halt drawdown total, jeda loss beruntun, kill file manual.
-- **Observability:** log JSON Lines berotasi + console, notifikasi Telegram non-blocking, heartbeat untuk healthcheck.
-- **Evaluasi:** backtest portofolio tanpa look-ahead, tiga simulasi sebanding, breakdown per tahun, diagnostik
-  biaya dalam R, sweep parameter, bootstrap CI ber-cluster.
+- **Tokocrypto connector:** signed REST (HMAC SHA256) with clock sync, a rate limiter (token bucket + the
+  `X-MBX-USED-WEIGHT-*` headers + `Retry-After` on 429/418), and a kline WebSocket with exponential-backoff
+  reconnects, a stale-data watchdog, and connection rotation before the 24-hour limit.
+- **Precision:** every order is validated with `Decimal` against `tickSize`, `stepSize`, `minNotional` and
+  `PERCENT_PRICE` before it is sent.
+- **Idempotency:** deterministic `clientId` per bar; on a timeout or 5XX during order placement the order is looked
+  up by `clientId`, never blindly resent → no double entries.
+- **Exchange-side protection:** a GTC `STOP_LOSS_LIMIT` that stays active if the bot dies, plus a watchdog that exits
+  at market when price gaps through it.
+- **Reconciliation** every 30 seconds: unconfirmed entries, stop-order status, balances vs. positions, orphan orders.
+- **Risk:** 1R sizing (costs on both sides included), max concurrent positions, daily drawdown kill-switch,
+  total drawdown hard halt, losing-streak pause, manual kill file.
+- **Observability:** rotating JSON Lines logs + console, non-blocking Telegram alerts, heartbeat for health checks.
+- **Evaluation:** look-ahead-free portfolio backtest, three comparable simulations, per-year breakdown, costs
+  measured in R, parameter sweep, clustered bootstrap CI.
 
-## 3. Alur sistem
+## 3. System flow
 
 ```mermaid
 flowchart LR
     subgraph Exchange[Tokocrypto]
         WS[(WS kline<br/>stream-cloud.tokocrypto.site)]
         REST[(REST /open/v1/*<br/>+ tokocrypto.site/api/v3)]
-        WSAPI[(WS API userDataStream<br/>opsional)]
+        WSAPI[(WS API userDataStream<br/>optional)]
     end
-    WS -->|tick + bar closed| MS[MarketStream<br/>reconnect + backoff + watchdog]
+    WS -->|tick + closed bar| MS[MarketStream<br/>reconnect + backoff + watchdog]
     MS --> BOT[TradingBot orchestrator]
-    BOT -->|bar closed| STRAT[MomentumRegimeStrategy<br/>regime filter + breakout + cost gate]
+    BOT -->|closed bar| STRAT[MomentumRegimeStrategy<br/>regime filter + breakout + cost gate]
     STRAT -->|Decision| BOT
-    BOT -->|sizing / can_open| RISK[RiskManager<br/>1R sizing, max pos, daily DD, hard halt]
+    BOT -->|sizing / can_open| RISK[RiskManager<br/>1R sizing, max positions, daily DD, hard halt]
     BOT -->|order| BRK{Broker}
-    BRK -->|PAPER| PB[PaperBroker<br/>saldo lokal + fee + pajak + slippage]
-    BRK -->|LIVE| LB[LiveBroker<br/>LIMIT IOC entry, MARKET exit,<br/>STOP_LOSS_LIMIT di bursa]
+    BRK -->|PAPER| PB[PaperBroker<br/>local balance + fee + tax + slippage]
+    BRK -->|LIVE| LB[LiveBroker<br/>LIMIT IOC entry, MARKET exit,<br/>exchange-side STOP_LOSS_LIMIT]
     LB --> REST
-    BOT -->|tiap 30 dtk| REC[Reconcile<br/>order, saldo, clientId]
+    BOT -->|every 30 s| REC[Reconcile<br/>orders, balances, clientId]
     REC --> REST
     WSAPI -.->|executionReport| REC
     BOT --> STORE[(state/*.json<br/>trades_*.jsonl)]
@@ -84,42 +87,44 @@ flowchart LR
     BOT --> TG[Telegram notifier]
 ```
 
-Siklus per bar (default **4h**):
-1. **Tick** (±2 dtk): soft-stop / watchdog stop bursa, TP1 parsial.
-2. **Bar close**: indikator dari 1000 bar terakhir → regime filter → trigger breakout → cost gate →
-   `RiskManager.can_open` → sizing → `Broker.buy` → stop dipasang di bursa.
-3. **Posisi terbuka**: trailing Chandelier diperbarui hanya saat bar close (sama dengan backtest).
-4. **Risk loop** (5 dtk): mark-to-market → daily kill / hard halt / kill file.
-5. **Reconcile loop** (30 dtk, LIVE).
+Per-bar cycle (default **4h**):
+1. **Tick** (~2 s): soft stop / exchange-stop watchdog, partial take-profit (TP1).
+2. **Bar close**: indicators over the last 1000 bars → regime filter → breakout trigger → cost gate →
+   `RiskManager.can_open` → sizing → `Broker.buy` → stop placed on the exchange.
+3. **Open position**: Chandelier trailing stop updated on bar close only (same as the backtest).
+4. **Risk loop** (5 s): mark-to-market → daily kill / hard halt / kill file.
+5. **Reconcile loop** (30 s, LIVE).
 
-## 4. Struktur direktori
+## 4. Project structure
 
 ```
 tokobot/
-├── main.py                        # orchestrator PAPER/LIVE + CLI (--status, --reset-halt)
-├── config.py                      # konfigurasi immutable dari env, validasi silang
+├── main.py                        # PAPER/LIVE orchestrator + CLI (--status, --reset-halt)
+├── config.py                      # immutable config from env, cross-validated
 ├── .env.example
 ├── core/models.py                 # Candle, Position, TradeRecord, FillResult
-├── exchange/tokocrypto_client.py  # REST signed, rate limiter, MarketStream, UserDataStream, SymbolRules
+├── exchange/tokocrypto_client.py  # signed REST, rate limiter, MarketStream, UserDataStream, SymbolRules
 ├── data/
-│   ├── indicators.py              # EMA, ATR, ADX, Donchian, Efficiency Ratio (kausal)
-│   └── history.py                 # CSV load/save, resample
-├── strategy/momentum_regime.py    # regime filter + sinyal + level stop/TP/trailing
-├── risk/risk_manager.py           # sizing + kill-switch berlapis
+│   ├── indicators.py              # EMA, ATR, ADX, Donchian, Efficiency Ratio (causal)
+│   └── history.py                 # CSV load/save, resampling
+├── strategy/momentum_regime.py    # regime filter + signal + stop/TP/trailing levels
+├── risk/risk_manager.py           # sizing + layered kill-switches
 ├── execution/
 │   ├── broker.py                  # PaperBroker, LiveBroker
-│   └── state_store.py             # JSON atomic + jurnal trade
-├── backtest/engine.py             # backtest portofolio, metrik, IS/OOS, unduh data
-├── notify/telegram.py             # notifikasi async non-blocking
-├── utils/logger.py                # console + JSON Lines berotasi
+│   └── state_store.py             # atomic JSON + trade journal
+├── backtest/engine.py             # portfolio backtest, metrics, IS/OOS, data download
+├── notify/telegram.py             # non-blocking async alerts
+├── utils/logger.py                # console + rotating JSON Lines
 ├── scripts/
-│   ├── preflight.py               # konektivitas, aturan simbol, fee & pajak akun
-│   ├── sweep.py                   # sweep parameter struktural (mode riset)
-│   ├── bootstrap_ci.py            # CI expectancy, opsi --cluster month
-│   └── make_synthetic_data.py     # data SINTETIS untuk smoke test
-├── tests/                         # 35 test: unit, invariant backtest, mock bursa REST+WS, resilience
+│   ├── preflight.py               # connectivity, symbol rules, account fee & tax
+│   ├── sweep.py                   # structural parameter sweep (research mode)
+│   ├── bootstrap_ci.py            # expectancy CI, --cluster month option
+│   └── make_synthetic_data.py     # SYNTHETIC data for smoke tests
+├── tests/                         # 35 tests: unit, backtest invariants, mock exchange REST+WS, resilience
 └── deploy/                        # Dockerfile, docker-compose.yml, tokobot.service
 ```
+
+Code comments, docstrings and log messages are in Indonesian.
 
 ## 5. Quickstart
 
@@ -127,90 +132,90 @@ tokobot/
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env && chmod 600 .env
-pytest -q                                     # 35 test, tanpa jaringan
+pytest -q                                     # 35 tests, no network needed
 ```
 
-Simpan data dan hasil **di luar folder kode**, supaya update kode tidak pernah menghapusnya. Di `.env`:
+Keep data and results **outside the code folder**, so code updates never delete them. In `.env`:
 ```bash
-BACKTEST_DATA_DIR=/path/ke/tokobot-data/historical
-BACKTEST_RESULTS_DIR=/path/ke/tokobot-data/results
+BACKTEST_DATA_DIR=/path/to/tokobot-data/historical
+BACKTEST_RESULTS_DIR=/path/to/tokobot-data/results
 ```
 
-Unduh candle **4h asli bursa** (sama dengan yang dilihat bot live), lalu bekukan dengan checksum:
+Download the exchange's **own 4h candles** (the same ones the live bot sees), then freeze them with checksums:
 ```bash
 SYMBOLS=BTC_USDT,ETH_USDT,SOL_USDT,BNB_USDT,XRP_USDT,ADA_USDT TIMEFRAME=4h \
   python -m backtest.engine --download --start 2018-01-01
-cd /path/ke/tokobot-data/historical && shasum -a 256 *.csv > SHA256SUMS && cd -
+cd /path/to/tokobot-data/historical && shasum -a 256 *.csv > SHA256SUMS && cd -
 
 python main.py --mode BACKTEST
-python scripts/preflight.py            # tambah --private bila API key terisi
+python scripts/preflight.py            # add --private once an API key is set
 python main.py --mode PAPER
 ```
 
-Bila hanya CSV 1h yang ada, backtest membentuk 4h sendiri dan membuang candle 4h yang tidak lengkap.
-Hasilnya bisa sedikit berbeda dari candle 4h bursa; untuk evaluasi, pakai data 4h asli.
+If only 1h CSVs exist, the backtest builds 4h candles itself and drops incomplete ones. Results can differ
+slightly from the exchange's 4h candles; for evaluation, use the native 4h data.
 
-## 6. Keputusan desain dan trade-off
+## 6. Design decisions and trade-offs
 
-| Keputusan | Alasan | Trade-off |
+| Decision | Why | Trade-off |
 |---|---|---|
-| Timeframe **4h**, stop **3×ATR** | Biaya round-trip ≈ **0,82%** (fee 0,15%×2 + PPh 0,21%×2 + slippage 0,05%×2). Di 1h, biaya > edge kotor. | ±19 trade/tahun per 2 aset; validasi live lambat. |
-| **Cost gate** (`MAX_COST_TO_RISK=0.25`, `MIN_REWARD_COST_RATIO=3`) | Sinyal dibuang bila biaya > 25% jarak stop atau TP1 < 3× biaya. | Sinyal berkurang saat volatilitas rendah. |
-| Regime filter berlapis (EMA, ADX naik, Efficiency Ratio, band ATR%) | Mengurangi entry di pasar choppy dan false wick. | Terlambat di awal tren; banyak parameter = risiko overfit. |
-| Entry **LIMIT IOC** di ask×(1+0,3%) | Slippage terbatasi; tidak ada order menggantung. | Bisa tidak terisi saat pasar cepat. |
-| Exit **MARKET** | Kepastian keluar lebih penting dari harga. | Slippage pada aset tipis. |
-| **STOP_LOSS_LIMIT** di bursa + watchdog | Proteksi aktif walau VPS mati. | Gap melewati limit → watchdog jual market. |
-| Qty bersih dari **selisih saldo** | Tidak bergantung aset komisi. | Wajib akun/sub-akun khusus bot; order serial lewat satu lock. |
-| `clientId` deterministik + `pending_entries` dipersist | Tidak ada double-entry setelah timeout/5XX. | Order yang benar-benar hilang dilepas setelah 15 menit. |
-| Daily DD dari ekuitas **termasuk unrealized** | Lebih konservatif. | Kill-switch bisa aktif oleh fluktuasi yang lalu pulih. |
-| Pajak **di dua sisi** (default) | Pair USDT = pertukaran dua aset kripto; konservatif. | Mungkin melebihkan biaya; verifikasi `taxRate` dari trade BUY. |
+| **4h** timeframe, **3×ATR** stop | Round-trip cost ≈ **0.82%** (fee 0.15%×2 + tax 0.21%×2 + slippage 0.05%×2). On 1h, costs exceed the gross edge. | ~19 trades/year for 2 coins; slow live validation. |
+| **Cost gate** (`MAX_COST_TO_RISK=0.25`, `MIN_REWARD_COST_RATIO=3`) | Skip signals where costs exceed 25% of the stop distance or TP1 is under 3× costs. | Fewer signals in low volatility. |
+| Layered regime filter (EMA, rising ADX, Efficiency Ratio, ATR% band) | Fewer entries in choppy markets and false wicks. | Late at the start of trends; more parameters = more overfitting risk. |
+| **LIMIT IOC** entry at ask×(1+0.3%) | Bounded slippage; no resting orders. | May not fill in fast markets. |
+| **MARKET** exit | Certainty of exit matters more than price. | Slippage on thin pairs. |
+| Exchange-side **STOP_LOSS_LIMIT** + watchdog | Protection survives a VPS crash. | A gap through the limit → watchdog sells at market. |
+| Net quantity from **balance deltas** | Independent of the commission asset. | Requires a dedicated (sub-)account; orders serialized behind one lock. |
+| Deterministic `clientId` + persisted `pending_entries` | No double entries after timeouts/5XX. | A truly lost order is released after 15 minutes. |
+| Daily drawdown on equity **including unrealized P&L** | More conservative. | The kill-switch can trip on a swing that later recovers. |
+| Tax on **both sides** (default) | A USDT pair swaps two crypto assets; conservative. | May overstate costs; verify `taxRate` on a BUY trade. |
 
-## 7. Asumsi yang perlu diverifikasi
+## 7. Assumptions to verify
 
-Kode diuji terhadap **mock** yang meniru format apidocs, belum terhadap order riil di server Tokocrypto.
+The code is tested against a **mock** that mimics the API docs, not against real orders on Tokocrypto's servers.
 
-1. **Pajak sisi beli** — lakukan satu trade kecil manual, lalu `python scripts/preflight.py --private` untuk melihat `taxRate` di trade BUY.
-2. **Fee** — akun VIP0 yang diverifikasi: 0,15% maker dan taker. Preflight memberi peringatan bila akun Anda berbeda.
-3. **`STOP_LOSS_LIMIT` per simbol** — preflight menampilkan dukungannya; bila tidak ada, bot memakai soft-stop.
-4. **Rate limit** — apidocs tidak menyebut angka; default konservatif 600 weight/menit.
-5. **User data stream (listenToken)** — default `USE_USER_STREAM=false`; REST reconcile tetap sumber kebenaran.
-6. **symbolType** — hanya type 1 yang didukung.
-7. **Stop terisi sebagian** — qty disesuaikan dari saldo, tetapi PnL leg parsial tidak tercatat presisi.
+1. **Buy-side tax** — place one small manual trade, then run `python scripts/preflight.py --private` and check `taxRate` on the BUY trade.
+2. **Fees** — the verified VIP0 account pays 0.15% maker and taker. Preflight warns if your account differs.
+3. **`STOP_LOSS_LIMIT` per symbol** — preflight shows support; without it the bot falls back to a soft stop.
+4. **Rate limits** — the docs give no numbers; the default is a conservative 600 weight/minute.
+5. **User data stream (listenToken)** — `USE_USER_STREAM=false` by default; REST reconciliation stays the source of truth.
+6. **symbolType** — only type 1 is supported.
+7. **Partially filled stops** — quantity is corrected from balances, but the P&L of the partial leg is not recorded precisely.
 
-## 8. Checklist pengujian → deployment
+## 8. Checklist: testing → deployment
 
-### Tahap 0 — Sanity lokal
-- [ ] `pytest -q` lulus (35 test), `python -m mypy --ignore-missing-imports .` dan `python -m pyflakes .` bersih.
+### Stage 0 — Local sanity
+- [ ] `pytest -q` passes (35 tests); `python -m mypy --ignore-missing-imports .` and `python -m pyflakes .` are clean.
 
-### Tahap 1 — Backtest
+### Stage 1 — Backtest
 
-`python main.py --mode BACKTEST` menjalankan tiga simulasi pada data dan periode yang sama:
+`python main.py --mode BACKTEST` runs three simulations on the same data and period:
 
-| Blok | Biaya | Circuit breaker | Dipakai untuk |
+| Block | Costs | Circuit breakers | Used for |
 |---|---|---|---|
-| **[1] Edge strategi** | ON | OFF | Menilai edge di seluruh periode, per tahun, IS/OOS |
-| **[2] Tanpa biaya** | OFF | OFF | Edge kotor; selisih dengan [1] = drag biaya |
-| **[3] Risk guard** | ON | ON | Perilaku live: kapan halt/pause terjadi |
+| **[1] Strategy edge** | ON | OFF | Judging the edge over the full period, per year, IS/OOS |
+| **[2] No costs** | OFF | OFF | Gross edge; the gap to [1] = cost drag |
+| **[3] Risk guard** | ON | ON | Live behaviour: when halts/pauses happen |
 
-- [ ] Pilih parameter hanya dari data seleksi (mis. `scripts/sweep.py` di 2022–2026), lalu **bekukan**.
-- [ ] Tulis kriteria lulus **sebelum** menguji di data yang belum dipakai (periode lain, aset lain).
-- [ ] Nilai dengan `scripts/bootstrap_ci.py --cluster month`: batas bawah CI 95% gabungan > 0.
-- [ ] Bagian "OOS" bawaan laporan hanya bermakna bila periode itu tidak dipakai saat memilih parameter.
-- [ ] Koreksi hanya berdasarkan fakta terverifikasi (fee/pajak dari akun), bukan untuk mencari hasil lebih bagus.
+- [ ] Choose parameters on selection data only (e.g. `scripts/sweep.py` on 2022–2026), then **freeze** them.
+- [ ] Write pass criteria **before** testing on unused data (other periods, other coins).
+- [ ] Judge with `scripts/bootstrap_ci.py --cluster month`: lower bound of the combined 95% CI > 0.
+- [ ] The report's built-in "OOS" only means something if that period wasn't used to choose parameters.
+- [ ] Correct only on verified facts (fee/tax from the account), never to chase better results.
 
-### Tahap 2 — Pre-flight
-- [ ] API key khusus bot: **Trade ON, Withdraw OFF, whitelist IP VPS**; idealnya sub-akun terpisah.
-- [ ] `python scripts/preflight.py --private` → LULUS; offset jam < 1000 ms.
+### Stage 2 — Pre-flight
+- [ ] A dedicated API key: **Trade ON, Withdraw OFF, IP whitelist**; ideally a separate sub-account.
+- [ ] `python scripts/preflight.py --private` → PASS; clock offset < 1000 ms.
 
-### Tahap 3 — Paper trading
-- [ ] `TRADING_MODE=PAPER`, Telegram aktif; uji ketahanan: putus jaringan, restart saat posisi terbuka, `touch state/KILL`.
-- [ ] Untuk membuktikan edge ke depan: tetapkan kriteria sekarang (mis. ≥ 150 trade dan batas bawah CI > 0).
+### Stage 3 — Paper trading
+- [ ] `TRADING_MODE=PAPER` with Telegram on; resilience tests: cut the network, restart with an open position, `touch state/KILL`.
+- [ ] To prove an edge forward: set criteria now (e.g. ≥ 150 trades and a CI lower bound > 0).
 
-### Tahap 4 — LIVE modal kecil (hanya bila uji edge lulus)
-- [ ] `LIVE_CONFIRM=I_UNDERSTAND_REAL_MONEY_RISK`, `CAPITAL_CAP_QUOTE` kecil, `RISK_PER_TRADE=0.005`.
-- [ ] Aturan berhenti ditetapkan di awal (mis. setelah 30 trade, rata-rata < −0,2R → hentikan).
+### Stage 4 — Small LIVE (only if the edge test passes)
+- [ ] `LIVE_CONFIRM=I_UNDERSTAND_REAL_MONEY_RISK`, small `CAPITAL_CAP_QUOTE`, `RISK_PER_TRADE=0.005`.
+- [ ] Set a stop rule up front (e.g. after 30 trades, mean < −0.2R → stop).
 
-### Tahap 5 — Deployment VPS Linux
+### Stage 5 — Linux VPS deployment
 
 **systemd**
 ```bash
@@ -229,12 +234,12 @@ mkdir -p state logs && chmod 600 .env
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Operasional: sinkronisasi waktu (chrony), firewall outbound 443 + SSH, backup `state/` harian,
-stop darurat `touch state/KILL` → `systemctl stop tokobot` (stop di bursa tetap aktif),
-reset setelah hard halt `python main.py --mode LIVE --reset-halt`.
+Operations: time sync (chrony), firewall with outbound 443 + SSH only, daily `state/` backups,
+emergency stop `touch state/KILL` → `systemctl stop tokobot` (exchange stops stay active),
+reset after a hard halt with `python main.py --mode LIVE --reset-halt`.
 
-## 9. Catatan
+## 9. Notes
 
-- Kode dan desain metodologi dikembangkan bersama asisten AI (Claude); run backtest, verifikasi akun, dan keputusan dilakukan oleh pemilik repo.
-- Bukan nasihat keuangan. Hasil backtest tidak menjamin hasil di masa depan.
-- Referensi: [Tokocrypto API docs](https://www.tokocrypto.com/apidocs/).
+- The code and methodology were developed together with an AI assistant (Claude); the repo owner ran every backtest, verified the account data, and made the decisions.
+- Not financial advice. Backtest results do not guarantee future returns.
+- Reference: [Tokocrypto API docs](https://www.tokocrypto.com/apidocs/).
